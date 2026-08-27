@@ -2,7 +2,6 @@ name: checkin-task
 
 on:
   workflow_dispatch:
-  push:
   schedule:
     # 定时北京时间凌晨1点执行，转换UTC时间 -8小时
     - cron: 00 17 * * *
