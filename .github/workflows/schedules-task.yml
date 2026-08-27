@@ -1,0 +1,22 @@
+name: checkin-task
+
+on:
+  workflow_dispatch:
+  push:
+  schedule:
+    # 定时北京时间凌晨1点执行，转换UTC时间 -8小时
+    - cron: 00 17 * * *
+
+jobs:
+  checkin-task:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run main
+        env:
+        # 注册环境变量
+          GLADOS: ${{ secrets.GLADOS }}

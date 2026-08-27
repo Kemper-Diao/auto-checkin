@@ -1,0 +1,39 @@
+const HOST = 'https://glados.cloud';
+const URL_REFERER = `${HOST}/console/checkin`;
+const URL_CHECKIN = `${HOST}/api/user/checkin`;
+const URL_STATUS = `${HOST}/api/user/status`;
+
+const autoCheckInGLaDOS = async () => {
+  const cookie = process.env.GLADOS;
+  if (!cookie) return;
+  try {
+    const headers = {
+      cookie: cookie,
+      referer: URL_REFERER,
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'content-type': 'application/json; charset=utf-8'
+    };
+    const checkin = await fetch(URL_CHECKIN, {
+      headers,
+      method: 'POST',
+      body: '{"token":"glados.cloud"}'
+    }).then(r => r.json());
+    const status = await fetch(URL_STATUS, {
+      headers,
+      method: 'GET'
+    }).then(r => r.json());
+    return [
+      'Checkin OK',
+      `${checkin.message}`,
+      `Left Days ${Number(status.data.leftDays)}`
+    ];
+  } catch (error) {
+    return [
+      'Checkin Error',
+      `${error}`,
+      `<${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}>`
+    ];
+  }
+};
+
+autoCheckInGLaDOS();
