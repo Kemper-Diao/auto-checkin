@@ -12,7 +12,7 @@
 
 3. 添加 Cookie 到 Secret GLADOS
 
-4. 启用 Actions, 每天北京时间 00:10 自动签到
+4. 启用 Actions, 每天北京时间 01:10 自动签到
 
 ## 优惠码
 
