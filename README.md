@@ -13,15 +13,8 @@
 3. 添加 Cookie 到 Secret GLADOS
 
 4. 启用 Actions, 每天北京时间 01:10 自动签到
+   (由于免费的工作流，github可能会任务过多出现延迟执行的现象，属于正常)
 
 ## 优惠码
 
 JY666（结账时使用可享受 9 折优惠（支付宝））
-
-PORTALGUN, 满 100 减 30
-
-CYBERCAT, 满 60 减 20
-
-OF-COURSE-I-STILL-LOVE-YOU, 满 150 减 30
-
-HUNTERX, 满 100 减 20
