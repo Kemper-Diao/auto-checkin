@@ -5,7 +5,10 @@ const URL_STATUS = `${HOST}/api/user/status`;
 
 const autoCheckInGLaDOS = async () => {
   const cookie = process.env.GLADOS;
-  if (!cookie) return;
+  if (!cookie) {
+    console.error('GLADOS secret is missing');
+    return;
+  }
   try {
     const headers = {
       cookie: cookie,
@@ -22,12 +25,15 @@ const autoCheckInGLaDOS = async () => {
       headers,
       method: 'GET'
     }).then(r => r.json());
-    return [
+    const result = [
       'Checkin OK',
       `${checkin.message}`,
       `Left Days ${Number(status.data.leftDays)}`
     ];
+    console.log(result.join('\n'));
+    return result;
   } catch (error) {
+    console.error('Checkin Error:', error);
     return [
       'Checkin Error',
       `${error}`,
