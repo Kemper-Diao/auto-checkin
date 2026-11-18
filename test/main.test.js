@@ -44,8 +44,7 @@ const withSite = async (mode, verify) => {
               else if (mode === 'verification-timeout') options['timeout-callback']();
               else if (mode === 'empty-token') options.callback('');
               else {
-                const wait = mode === 'expired-always' || (mode === 'expired-once' && challenge.attempt === 1) ? 3500 : 0;
-                setTimeout(() => options.callback('token-for-' + options.cData), wait);
+                setTimeout(() => options.callback('token-for-' + options.cData), 0);
               }
               return 'fixture-widget';
             }
@@ -64,7 +63,7 @@ const withSite = async (mode, verify) => {
       res.end(JSON.stringify({
         code: mode === 'invalid-login' ? 1 : 0,
         nonce,
-        ttl: mode === 'invalid-ttl' ? 100 : mode === 'expired-always' || (mode === 'expired-once' && attempt === 1) ? 18000 : 300000,
+        ttl: mode === 'invalid-ttl' ? 100 : 300000,
         turnstile: mode === 'off' ? null : 'fixture-sitekey',
         attempt
       }));
@@ -97,7 +96,7 @@ const withSite = async (mode, verify) => {
   }
 };
 
-for (const mode of ['ok', 'off', 'expired-once']) {
+for (const mode of ['ok', 'off', 'sdk-missing', 'verification-error', 'verification-timeout', 'empty-token']) {
   test(`browser flow: ${mode}`, { timeout: 30000 }, async () => withSite(mode, async ({ run, requests, challenges, widgets }) => {
     assert.deepEqual(await run(), ['Checkin OK', 'fixture result', 'Left Days 5']);
     const posts = requests.filter(request => request.path === '/api/user/checkin');
@@ -114,33 +113,21 @@ for (const mode of ['ok', 'off', 'expired-once']) {
     assert.equal(post.headers['content-type'], 'application/json;charset=UTF-8');
     assert.equal(post.headers['sec-ch-ua-platform'], '"Windows"');
     assert.equal(post.headers.referer, undefined);
-    if (mode === 'off') {
-      assert.equal(payload.tsState, 'off');
-      assert.equal(Object.hasOwn(payload, 'turnstile'), false);
-      assert.equal(widgets.length, 0);
-    } else {
-      assert.equal(payload.tsState, 'ok');
-      assert.equal(payload.turnstile, `token-for-${challenge.nonce}`);
-      assert.deepEqual(widgets.at(-1), { sitekey: 'fixture-sitekey', action: 'checkin', nonce: challenge.nonce });
-    }
-    assert.equal(challenges.length, mode === 'expired-once' ? 2 : 1);
+    assert.deepEqual(Object.keys(payload).sort(), ['nonce', 'proof', 'token']);
+    assert.equal(widgets.length, 0, 'must not render a Turnstile widget');
+    assert.equal(challenges.length, 1);
   }));
 }
 
 for (const [mode, message] of [
-  ['verification-error', /verification failed/],
-  ['verification-timeout', /interaction timed out/],
-  ['empty-token', /empty token/],
-  ['expired-always', /expired before submission/],
   ['invalid-login', /login Cookie/],
   ['invalid-ttl', /TTL/],
-  ['challenge-http-error', /HTTP 403/],
-  ['sdk-missing', /Timeout/]
+  ['challenge-http-error', /HTTP 403/]
 ]) {
   test(`does not submit when ${mode}`, { timeout: 35000 }, async () => withSite(mode, async ({ run, requests, challenges }) => {
     await assert.rejects(run, message);
     assert.equal(requests.filter(request => request.path === '/api/user/checkin').length, 0);
-    assert.equal(challenges.length, mode === 'expired-always' ? 2 : 1);
+    assert.equal(challenges.length, 1);
   }));
 }
 

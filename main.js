@@ -7,7 +7,6 @@ import { chromium } from 'playwright';
 const HOST = 'https://glados.cloud';
 const MIN_CHALLENGE_AGE = 2_500;
 const EXPIRY_MARGIN = 15_000;
-const TURNSTILE_TIMEOUT = 90_000;
 const API_HEADERS = {
   'sec-ch-ua-platform': '"Windows"',
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36',
@@ -37,60 +36,6 @@ export const parseCookies = (cookie, host = HOST) => {
   return cookies;
 };
 
-// 在真实签到页面中运行，token 只由 Cloudflare 的成功回调提供。
-export const renderTurnstile = ({ sitekey, nonce, timeoutMs = 90_000, headless = true }) => new Promise((resolve, reject) => {
-  let timer;
-  let settled = false;
-  let interactive = false;
-  const help = 'Try locally with GLADOS set and node main.js --headed --channel=chrome to complete verification manually.';
-  const finish = (error, token) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    if (error) reject(new Error(`${error}. ${help}`));
-    else resolve(token);
-  };
-
-  // 替换页面自动创建的组件，确保本次回调明确对应当前 nonce。
-  try { window.turnstile.remove(); } catch { /* 页面可能尚未创建组件。 */ }
-  const container = document.createElement('div');
-  container.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:2147483647';
-  document.body.appendChild(container);
-  // 静默验证同样可能超过 15 秒；所有阶段共用上限，不因交互回调延长 nonce 的有效期。
-  timer = setTimeout(() => finish(interactive
-    ? 'Turnstile interaction timed out'
-    : `Turnstile verification timed out after ${timeoutMs} ms (no success callback received)`), timeoutMs);
-  try {
-    window.turnstile.render(container, {
-      sitekey,
-      action: 'checkin',
-      cData: nonce,
-      appearance: 'interaction-only',
-      theme: 'auto',
-      callback: token => {
-        if (typeof token !== 'string' || !token.trim()) {
-          finish('Turnstile returned an empty token');
-        } else {
-          finish(null, token);
-        }
-      },
-      'before-interactive-callback': () => {
-        interactive = true;
-        if (headless) finish('Turnstile requires manual interaction; the headless runner cannot complete it');
-      },
-      'error-callback': code => {
-        finish(`Turnstile verification failed${code ? ` (Cloudflare code: ${code})` : ''}`);
-        return true;
-      },
-      'unsupported-callback': () => finish('Turnstile does not support this browser'),
-      'expired-callback': () => finish('Turnstile token expired'),
-      'timeout-callback': () => finish('Turnstile interaction timed out')
-    });
-  } catch {
-    finish('Unable to render Turnstile');
-  }
-});
-
 const readJsonResponse = async response => {
   if (!response.ok()) throw new Error(`Challenge request failed: HTTP ${response.status()}`);
   try {
@@ -100,7 +45,7 @@ const readJsonResponse = async response => {
   }
 };
 
-const getCheckinBody = async (page, host, headless) => {
+const getCheckinBody = async (page, host) => {
   for (let attempt = 0; attempt < 2; attempt++) {
     // 使用网页自己发出的 challenge 请求，避免额外获取 nonce 使页面中的验证失效。
     const challengeResponse = page.waitForResponse(response =>
@@ -122,44 +67,19 @@ const getCheckinBody = async (page, host, headless) => {
     }
     if (Date.now() - at >= ttl - EXPIRY_MARGIN) continue;
 
-    let token;
-    if (challenge.turnstile) {
-      if (typeof challenge.turnstile !== 'string') throw new Error('Invalid Turnstile sitekey');
-      console.log('Waiting for Turnstile verification...');
-      await page.waitForFunction(() => typeof window.turnstile?.render === 'function',
-        null, { timeout: 15_000 });
-      const remaining = ttl - EXPIRY_MARGIN - (Date.now() - at);
-      if (remaining <= 0) continue;
-      try {
-        token = await page.evaluate(renderTurnstile, {
-          sitekey: challenge.turnstile,
-          nonce: challenge.nonce,
-          timeoutMs: Math.min(TURNSTILE_TIMEOUT, remaining),
-          headless
-        });
-      } catch (error) {
-        // 等待被 nonce 的有效期截断时，沿用已有的有限次数刷新逻辑。
-        if (Date.now() - at >= ttl - EXPIRY_MARGIN
-            && /Turnstile (verification|interaction) timed out/.test(error.message)) continue;
-        throw error;
-      }
-    }
-
     await sleep(Math.max(0, MIN_CHALLENGE_AGE - (Date.now() - at)));
-    // 验证期间也可能过期；只重新获取 challenge，不重试已经提交的签到请求。
+    // 等待期间也可能过期；只重新获取 challenge，不重试已经提交的签到请求。
     if (Date.now() - at >= ttl - EXPIRY_MARGIN) continue;
     return JSON.stringify({
       token: new URL(host).hostname,
       nonce: challenge.nonce,
-      proof: checkinProof(challenge.nonce),
-      tsState: token ? 'ok' : 'off',
-      ...(token ? { turnstile: token } : {})
+      proof: checkinProof(challenge.nonce)
     });
   }
   throw new Error('Checkin challenge expired before submission');
 };
 
-// 请求在同一浏览器页面中发送，沿用验证期间更新的 Cookie、网络环境和会话。
+// 请求在同一浏览器页面中发送，沿用页面更新的 Cookie、网络环境和会话。
 const requestJson = async (page, url, method = 'GET', body) => page.evaluate(
   async ({ url, method, body }) => {
     const response = await fetch(url, {
@@ -195,7 +115,7 @@ export const autoCheckInGLaDOS = async ({
     await page.route(`${host}/api/**`, route => route.continue({
       headers: { ...route.request().headers(), ...API_HEADERS }
     }));
-    const body = await getCheckinBody(page, host, launchOptions.headless !== false);
+    const body = await getCheckinBody(page, host);
     const checkin = await requestJson(page, `${host}/api/user/checkin`, 'POST', body);
     if (!checkin || checkin.code == null || Number(checkin.code) !== 0) {
       throw new Error(`Checkin rejected: ${checkin?.message || checkin?.reason || 'unknown response'}`);
